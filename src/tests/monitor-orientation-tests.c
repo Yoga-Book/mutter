@@ -141,6 +141,7 @@ meta_test_monitor_orientation_initial_portrait_mode_workaround (void)
           .height_mm = 222,
           .connector_type = META_CONNECTOR_TYPE_eDP,
           .serial = "0x123456",
+          .panel_orientation_transform = MTK_MONITOR_TRANSFORM_270,
         },
       },
       .n_outputs = 1,
@@ -159,8 +160,8 @@ meta_test_monitor_orientation_initial_portrait_mode_workaround (void)
           .n_outputs = 1,
           .modes = {
             {
-              .width = 1080,
-              .height = 1920,
+              .width = 1920,
+              .height = 1080,
               .refresh_rate = 60.000495910644531,
               .crtc_modes = {
                 {
@@ -211,6 +212,7 @@ meta_test_monitor_orientation_initial_portrait_mode_workaround (void)
   unsigned int n_orientation_changed = 0;
 
   g_test_message ("%s", G_STRFUNC);
+  g_test_bug ("https://gitlab.gnome.org/GNOME/mutter/-/work_items/4204");
 
   orientation_mock = meta_sensors_proxy_mock_get ();
 
@@ -241,6 +243,41 @@ meta_test_monitor_orientation_initial_portrait_mode_workaround (void)
                                            META_ORIENTATION_RIGHT_UP);
   while (n_orientation_changed != 1)
     g_main_context_iteration (NULL, TRUE);
+
+  META_TEST_LOG_CALL ("Checking configuration per orientation",
+                      check_monitor_configuration_per_orientation (
+                        &test_case, 0, META_ORIENTATION_RIGHT_UP,
+                        1080, 1920));
+
+  /* Enter touch mode, rotate to landscape, then return to laptop mode. */
+  meta_backend_test_remove_test_device (META_BACKEND_TEST (backend),
+                                        pointer_device);
+  g_clear_object (&pointer_device);
+
+  g_assert_true (clutter_seat_get_touch_mode (seat));
+  meta_sensors_proxy_mock_wait_accelerometer_claimed (orientation_mock, TRUE);
+
+  while (meta_orientation_manager_get_orientation (orientation_manager) !=
+         META_ORIENTATION_NORMAL)
+    g_main_context_iteration (NULL, TRUE);
+
+  n_orientation_changed = 0;
+  meta_sensors_proxy_mock_set_orientation (orientation_mock,
+                                           META_ORIENTATION_RIGHT_UP);
+  while (n_orientation_changed != 1)
+    g_main_context_iteration (NULL, TRUE);
+
+  META_TEST_LOG_CALL ("Checking configuration per orientation",
+                      check_monitor_configuration_per_orientation (
+                        &test_case, 0, META_ORIENTATION_RIGHT_UP,
+                        1080, 1920));
+
+  pointer_device =
+    meta_backend_test_add_test_device (META_BACKEND_TEST (backend),
+                                       CLUTTER_POINTER_DEVICE, 1);
+
+  g_assert_false (clutter_seat_get_touch_mode (seat));
+  meta_sensors_proxy_mock_wait_accelerometer_claimed (orientation_mock, FALSE);
 
   META_TEST_LOG_CALL ("Checking configuration per orientation",
                       check_monitor_configuration_per_orientation (

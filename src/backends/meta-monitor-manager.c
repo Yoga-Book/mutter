@@ -950,14 +950,30 @@ handle_orientation_change (MetaOrientationManager *orientation_manager,
  * NOT in tablet-mode (because it is docked).
  */
 static gboolean
+has_native_portrait_mode (MetaMonitorManager *manager)
+{
+  MetaMonitor *monitor;
+  MetaOutput *output;
+  const MetaOutputInfo *output_info;
+  const MetaCrtcModeInfo *crtc_mode_info;
+
+  monitor = meta_monitor_manager_get_builtin_monitor (manager);
+  if (!monitor)
+    return FALSE;
+
+  output = meta_monitor_get_main_output (monitor);
+  output_info = meta_output_get_info (output);
+  crtc_mode_info = meta_crtc_mode_get_info (output_info->preferred_mode);
+
+  return crtc_mode_info->width <= crtc_mode_info->height;
+}
+
+static gboolean
 handle_initial_orientation_change (MetaOrientationManager *orientation_manager,
                                    MetaMonitorManager     *manager)
 {
   ClutterBackend *clutter_backend;
   ClutterSeat *seat;
-  MetaMonitor *monitor;
-  MetaMonitorMode *mode;
-  int width, height;
 
   clutter_backend = meta_backend_get_clutter_backend (manager->backend);
   seat = clutter_backend_get_default_seat (clutter_backend);
@@ -968,17 +984,8 @@ handle_initial_orientation_change (MetaOrientationManager *orientation_manager,
    * accelerometer requirements for applying the orientation must still be met.
    */
   if (!clutter_seat_has_touchscreen (seat) ||
-      !meta_orientation_manager_has_accelerometer (orientation_manager))
-    return FALSE;
-
-  /* Check for a portrait mode panel */
-  monitor = meta_monitor_manager_get_builtin_monitor (manager);
-  if (!monitor)
-    return FALSE;
-
-  mode = meta_monitor_get_preferred_mode (monitor);
-  meta_monitor_mode_get_resolution (mode, &width, &height);
-  if (width > height)
+      !meta_orientation_manager_has_accelerometer (orientation_manager) ||
+      !has_native_portrait_mode (manager))
     return FALSE;
 
   handle_orientation_change (orientation_manager, manager);
@@ -1131,11 +1138,13 @@ update_panel_orientation_managed (MetaMonitorManager *manager)
   ClutterBackend *clutter_backend;
   ClutterSeat *seat;
   gboolean panel_orientation_managed;
+  MetaOrientation orientation;
 
   clutter_backend = meta_backend_get_clutter_backend (manager->backend);
   seat = clutter_backend_get_default_seat (clutter_backend);
 
   orientation_manager = meta_backend_get_orientation_manager (manager->backend);
+  orientation = meta_orientation_manager_get_orientation (orientation_manager);
 
   panel_orientation_managed =
     (clutter_seat_get_touch_mode (seat) &&
@@ -1156,13 +1165,17 @@ update_panel_orientation_managed (MetaMonitorManager *manager)
 
   /* When transitioning to managed, claiming the sensor is asynchronous; we
    * listen to MetaOrientationManager::sensor-active to rotate to the current
-   * orientation once it's claimed. When transitioning to unmanaged, rotate
-   * back to a normal transform.
+   * orientation once it's claimed. When transitioning to unmanaged, native
+   * portrait panels keep their last sensor-derived transform.
    */
   if (!panel_orientation_managed)
     {
+      MtkMonitorTransform transform = MTK_MONITOR_TRANSFORM_NORMAL;
       MetaMonitorsConfig *current_config =
         meta_monitor_config_manager_get_current (manager->config_manager);
+
+      if (has_native_portrait_mode (manager))
+        transform = meta_orientation_to_transform (orientation);
 
       if (current_config)
         {
@@ -1172,7 +1185,7 @@ update_panel_orientation_managed (MetaMonitorManager *manager)
           config =
             meta_monitor_config_manager_create_for_orientation (manager->config_manager,
                                                                 current_config,
-                                                                MTK_MONITOR_TRANSFORM_NORMAL);
+                                                                transform);
 
           if (config)
             {
@@ -1181,7 +1194,7 @@ update_panel_orientation_managed (MetaMonitorManager *manager)
                                                                META_MONITORS_CONFIG_METHOD_TEMPORARY,
                                                                &error))
                 {
-                  g_warning ("Failed to rotate monitor back to normal transform: %s",
+                  g_warning ("Failed to apply unmanaged monitor orientation: %s",
                              error->message);
                 }
             }
