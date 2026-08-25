@@ -950,14 +950,30 @@ handle_orientation_change (MetaOrientationManager *orientation_manager,
  * NOT in tablet-mode (because it is docked).
  */
 static gboolean
+has_native_portrait_mode (MetaMonitorManager *manager)
+{
+  MetaMonitor *monitor;
+  MetaOutput *output;
+  const MetaOutputInfo *output_info;
+  const MetaCrtcModeInfo *crtc_mode_info;
+
+  monitor = meta_monitor_manager_get_builtin_monitor (manager);
+  if (!monitor)
+    return FALSE;
+
+  output = meta_monitor_get_main_output (monitor);
+  output_info = meta_output_get_info (output);
+  crtc_mode_info = meta_crtc_mode_get_info (output_info->preferred_mode);
+
+  return crtc_mode_info->width <= crtc_mode_info->height;
+}
+
+static gboolean
 handle_initial_orientation_change (MetaOrientationManager *orientation_manager,
                                    MetaMonitorManager     *manager)
 {
   ClutterBackend *clutter_backend;
   ClutterSeat *seat;
-  MetaMonitor *monitor;
-  MetaMonitorMode *mode;
-  int width, height;
 
   clutter_backend = meta_backend_get_clutter_backend (manager->backend);
   seat = clutter_backend_get_default_seat (clutter_backend);
@@ -968,17 +984,8 @@ handle_initial_orientation_change (MetaOrientationManager *orientation_manager,
    * accelerometer requirements for applying the orientation must still be met.
    */
   if (!clutter_seat_has_touchscreen (seat) ||
-      !meta_orientation_manager_has_accelerometer (orientation_manager))
-    return FALSE;
-
-  /* Check for a portrait mode panel */
-  monitor = meta_monitor_manager_get_builtin_monitor (manager);
-  if (!monitor)
-    return FALSE;
-
-  mode = meta_monitor_get_preferred_mode (monitor);
-  meta_monitor_mode_get_resolution (mode, &width, &height);
-  if (width > height)
+      !meta_orientation_manager_has_accelerometer (orientation_manager) ||
+      !has_native_portrait_mode (manager))
     return FALSE;
 
   handle_orientation_change (orientation_manager, manager);
@@ -1138,7 +1145,9 @@ update_panel_orientation_managed (MetaMonitorManager *manager)
   orientation_manager = meta_backend_get_orientation_manager (manager->backend);
 
   panel_orientation_managed =
-    (clutter_seat_get_touch_mode (seat) &&
+    ((clutter_seat_get_touch_mode (seat) ||
+      (clutter_seat_has_touchscreen (seat) &&
+       has_native_portrait_mode (manager))) &&
      meta_orientation_manager_has_accelerometer (orientation_manager) &&
      meta_monitor_manager_get_builtin_monitor (manager));
 
@@ -4412,6 +4421,12 @@ meta_monitor_manager_post_init (MetaMonitorManager *manager)
   g_signal_connect_object (seat, "notify::touch-mode",
                            G_CALLBACK (update_panel_orientation_managed), manager,
                            G_CONNECT_SWAPPED);
+  g_signal_connect_object (seat, "device-added",
+                           G_CALLBACK (update_panel_orientation_managed), manager,
+                           G_CONNECT_SWAPPED | G_CONNECT_AFTER);
+  g_signal_connect_object (seat, "device-removed",
+                           G_CALLBACK (update_panel_orientation_managed), manager,
+                           G_CONNECT_SWAPPED | G_CONNECT_AFTER);
 }
 
 MetaViewportInfo *
