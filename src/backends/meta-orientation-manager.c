@@ -530,6 +530,12 @@ meta_orientation_manager_inhibit_tracking (MetaOrientationManager *self)
 void
 meta_orientation_manager_uninhibit_tracking (MetaOrientationManager *self)
 {
+  if (self->inhibited_count == 0)
+    {
+      sync_accelerometer_claimed (self);
+      return;
+    }
+
   self->inhibited_count--;
 
   if (self->inhibited_count == 0)
